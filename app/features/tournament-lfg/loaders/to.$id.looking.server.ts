@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import * as R from "remeda";
 import type { getUser } from "~/features/auth/core/user.server";
+import * as MatchProfileRepository from "~/features/match-profile/MatchProfileRepository.server";
 import { resolveNotifications } from "~/features/notifications/core/resolve.server";
 import {
 	tournamentFromParams,
@@ -109,6 +110,7 @@ async function lookingMode({
 		ownGroup,
 		ownTeam,
 		likes,
+		matchProfile: ownGroup || ownTeam ? null : await findOwnMatchProfile(user),
 		tournamentId,
 	};
 }
@@ -133,9 +135,7 @@ async function subsMode({
 			teamId: group.id,
 			userId: member.id,
 			username: member.username,
-			discordId: member.discordId,
-			discordAvatar: member.discordAvatar,
-			customAvatarUrl: member.customAvatarUrl,
+			avatar: member.avatar,
 			customUrl: member.customUrl,
 			vc: member.vc,
 			languages,
@@ -145,13 +145,16 @@ async function subsMode({
 		};
 	});
 
+	const hasOwnSubPost = subs.some((sub) => sub.userId === user?.id);
+
 	return {
 		mode: "subs" as const,
 		...(await UserCardRepository.findAllByUserIds({
 			userIds: subs.map((sub) => sub.userId),
 		})),
 		subs,
-		hasOwnSubPost: subs.some((sub) => sub.userId === user?.id),
+		hasOwnSubPost,
+		matchProfile: hasOwnSubPost ? null : await findOwnMatchProfile(user),
 		tournamentId,
 	};
 }
@@ -184,9 +187,7 @@ async function resolveOwnTeam({
 	const members: LFGGroupMember[] = team.members.map((m) => ({
 		id: m.userId,
 		username: m.username,
-		discordId: m.discordId,
-		discordAvatar: m.discordAvatar,
-		customAvatarUrl: m.customAvatarUrl,
+		avatar: m.avatar,
 		customUrl: m.customUrl,
 		languages: [],
 		vc: null,
@@ -207,6 +208,15 @@ async function resolveOwnTeam({
 	};
 }
 
+async function findOwnMatchProfile(user: ReturnType<typeof getUser>) {
+	if (!user) return null;
+
+	const { vc, languages, weaponPool } =
+		await MatchProfileRepository.findSettingsByUserId(user.id);
+
+	return { vc, languages: languages ?? [], weaponPool };
+}
+
 function transformMembers(
 	rawMembers: Awaited<
 		ReturnType<typeof TournamentLFGRepository.findLookingTeamsByTournamentId>
@@ -220,9 +230,7 @@ function transformMembers(
 		return {
 			id: m.id,
 			username: m.username,
-			discordId: m.discordId,
-			discordAvatar: m.discordAvatar,
-			customAvatarUrl: m.customAvatarUrl,
+			avatar: m.avatar,
 			customUrl: m.customUrl,
 			languages,
 			vc: m.vc,

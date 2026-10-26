@@ -24,6 +24,7 @@ import {
 } from "react-router";
 import { Config } from "~/config";
 import type { CustomTheme } from "~/db/tables-json";
+import { devToolsServerHooks } from "~/features/dev-tools/dev-tools-server-hooks.server";
 import { resolveLayoutData } from "~/features/layout/core/layout.server";
 import { useDebounce } from "~/hooks/useDebounce";
 import { useIsomorphicLayoutEffect } from "~/hooks/useIsomorphicLayoutEffect";
@@ -89,6 +90,7 @@ import "nprogress/nprogress.css";
 const PRELOAD_TRANSLATION_TIMEOUT_MS = 3000;
 
 export const middleware: Route.MiddlewareFunction[] = [
+	...(devToolsServerHooks ? [devToolsServerHooks.middleware] : []),
 	redirectsMiddleware,
 	requestContextMiddleware,
 	sessionIdMiddleware,
@@ -96,6 +98,14 @@ export const middleware: Route.MiddlewareFunction[] = [
 	i18nMiddleware,
 	timezoneMiddleware,
 ];
+
+const DevToolbar = import.meta.env.DEV
+	? React.lazy(() =>
+			import("./features/dev-tools/components/DevToolbar").then((module) => ({
+				default: module.DevToolbar,
+			})),
+		)
+	: null;
 
 // anchors the loading bar to the header (between the sidebars); at module scope so
 // even the very first navigation's NProgress.start doesn't render over the sidebar
@@ -158,11 +168,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 		user: user
 			? {
 					username: user.username,
-					discordAvatar: user.discordAvatar,
-					discordId: user.discordId,
 					id: user.id,
 					customUrl: user.customUrl,
-					customAvatarUrl: user.customAvatarUrl,
+					avatar: user.avatar,
 					inGameName: user.inGameName,
 					friendCode: user.friendCode,
 					preferences: user.preferences ?? {},
@@ -271,6 +279,7 @@ function Document({
 							<SendouToastRegion />
 							<UnsavedChangesGuard />
 							<TranslationPreview />
+							{DevToolbar ? <DevToolbarMount Toolbar={DevToolbar} /> : null}
 							<MyFuse data={rootData} />
 							<ChatProvider
 								user={rootData?.user}
@@ -369,18 +378,28 @@ function useScrollBeforeToast() {
 }
 
 function useLoadingIndicator() {
-	const transition = useNavigation();
+	const navigation = useNavigation();
+	const fetchers = useFetchers();
+
+	// submissions already show a pending state on their submit button
+	const isSubmissionFollowUp =
+		navigation.formMethod !== undefined ||
+		fetchers.some(
+			(fetcher) =>
+				fetcher.state === "loading" && fetcher.formMethod !== undefined,
+		);
+	const isLoading = navigation.state === "loading" && !isSubmissionFollowUp;
 
 	useDebounce(
 		() => {
-			if (transition.state === "loading") {
+			if (isLoading) {
 				NProgress.start();
-			} else if (transition.state === "idle") {
+			} else {
 				NProgress.done();
 			}
 		},
 		150,
-		[transition.state],
+		[isLoading],
 	);
 }
 
@@ -468,6 +487,18 @@ export function ErrorBoundary() {
 				<Catcher />
 			</Document>
 		</ThemeProvider>
+	);
+}
+
+function DevToolbarMount({ Toolbar }: { Toolbar: React.ComponentType }) {
+	const isHydrated = useHydrated();
+
+	if (!isHydrated) return null;
+
+	return (
+		<React.Suspense fallback={null}>
+			<Toolbar />
+		</React.Suspense>
 	);
 }
 
